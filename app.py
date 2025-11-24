@@ -1,62 +1,70 @@
 import streamlit as st
 import google.generativeai as genai
-import time
 
-st.set_page_config(page_title="Teste do Vovô", page_icon="🔧")
+# --- Configuração ---
+st.set_page_config(page_title="Gemini 2.5", page_icon="⚡")
+st.title("⚡ Gemini 2.5 Flash")
 
-st.title("🔧 Modo de Diagnóstico")
-st.write("1. Iniciando o aplicativo... OK")
-
-# --- TESTE DA CHAVE ---
-st.write("2. Verificando a chave de segurança...")
-
-if "GOOGLE_API_KEY" in st.secrets:
-    st.success("✅ Chave encontrada nos Secrets!")
-    chave = st.secrets["GOOGLE_API_KEY"]
-else:
-    st.error("❌ ERRO: A chave 'GOOGLE_API_KEY' não está nos Secrets.")
-    st.info("Vá em Settings -> Secrets e cole: GOOGLE_API_KEY = 'sua-chave'")
-    st.stop() # Para aqui se der erro
-
-# --- TESTE DE CONEXÃO ---
-st.write("3. Conectando com o Google Gemini...")
-
+# 1. PEGAR A CHAVE
 try:
-    genai.configure(api_key=chave)
-    # Vamos usar o modelo mais estável para teste
-    modelo = genai.GenerativeModel('gemini-1.5-flash')
-    st.success("✅ Conexão com Google OK!")
-except Exception as e:
-    st.error(f"❌ Erro ao conectar no Google: {e}")
+    api_key = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=api_key)
+except:
+    st.error("Coloque a chave GOOGLE_API_KEY nos Secrets!")
     st.stop()
 
-# --- CHAT ---
-st.write("4. Carregando interface do Chat...")
-st.divider()
+# 2. SELEÇÃO DE MODELO (MODO TEIMOSO)
+# Vamos tentar os nomes possíveis do 2.5 até um funcionar
+nomes_para_testar = [
+    "gemini-2.5-flash",
+    "models/gemini-2.5-flash", 
+    "gemini-2.0-flash-exp", 
+    "gemini-1.5-flash"
+]
 
-# Histórico
+modelo_ativo = None
+nome_final = ""
+
+with st.spinner("Conectando no satélite do Google..."):
+    for nome in nomes_para_testar:
+        try:
+            teste_modelo = genai.GenerativeModel(nome)
+            # Teste de vida rápido
+            teste_modelo.generate_content("Oi")
+            # Se não deu erro, achamos!
+            modelo_ativo = teste_modelo
+            nome_final = nome
+            break
+        except:
+            continue
+
+if modelo_ativo:
+    st.toast(f"Conectado com sucesso no: {nome_final} 🚀", icon="✅")
+else:
+    st.error("❌ ERRO CRÍTICO: Nenhum modelo funcionou. Verifique se sua chave API tem permissão ou atualize o requirements.txt")
+    st.stop()
+
+# 3. CHAT
 if "mensagens" not in st.session_state:
     st.session_state.mensagens = []
-
-# Mostra msg inicial se estiver vazio
-if not st.session_state.mensagens:
-    st.info("O Chat está pronto! Olhe para baixo 👇")
 
 for msg in st.session_state.mensagens:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- O CAMPO DE DIGITAR ---
-prompt = st.chat_input("Digita um 'Oi' aqui embaixo...")
-
-if prompt:
+if prompt := st.chat_input("Manda ver..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.mensagens.append({"role": "user", "content": prompt})
 
     with st.chat_message("assistant"):
         try:
-            response = modelo.generate_content(prompt)
-            st.markdown(response.text)
-            st.session_state.mensagens.append({"role": "assistant", "content": response.text})
+            chat = modelo_ativo.start_chat(history=[
+                {"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
+                for m in st.session_state.mensagens[:-1]
+            ])
+            response = chat.send_message(prompt, stream=True)
+            
+            texto = st.write_stream(response)
+            st.session_state.mensagens.append({"role": "assistant", "content": texto})
         except Exception as e:
-            st.error(f"Erro ao responder: {e}")
+            st.error(f"Erro: {e}")
